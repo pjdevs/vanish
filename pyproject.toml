@@ -1,0 +1,20 @@
+[project]
+name = "vanish-cam"
+version = "0.1.0"
+description = "Vanishing effects for the webcam, with output to a virtual webcam (OBS)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mediapipe>=1.1.1,<2",
+    "opencv-contrib-python>=4.14,<6",
+    "numpy>=2.0,<3",
+    "pyvirtualcam>=0.15,<1",
+    # On macOS audio uses afplay (see vanish_sound.py).
+    "pygame-ce>=2.5,<3; sys_platform != 'darwin'",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
