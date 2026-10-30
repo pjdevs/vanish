@@ -87,6 +87,7 @@ class GokuState:
     mask_at: float = float("-inf")
     line_mask: np.ndarray | None = None
     lines: list = field(default_factory=list)
+    gain: np.ndarray | None = None
     last_report: float = 0.0
 
 
@@ -685,11 +686,18 @@ class GokuDetector:
             self.face.close()
 
 
-def clean_plate(frame: np.ndarray, background: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Live frame everywhere except a padded hole around the person, filled from the background."""
-    hole = cv2.dilate((mask > 0.2).astype(np.uint8), np.ones((31, 31), np.uint8)).astype(np.float32)
-    hole = np.maximum(cv2.GaussianBlur(hole, (0, 0), sigmaX=8.0), mask)
-    return alpha_composite(background, frame, hole)
+def exposure_gain(frame: np.ndarray, background: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Per-channel factor that brings the background to the live exposure, measured away from the person."""
+    keep = cv2.dilate((mask > 0.05).astype(np.uint8), np.ones((15, 15), np.uint8))[::8, ::8] == 0
+    if keep.sum() < 200:
+        return np.ones(3, np.float32)
+    live = np.median(frame[::8, ::8][keep], axis=0)
+    fixed = np.median(background[::8, ::8][keep], axis=0)
+    return np.clip(live / np.maximum(fixed, 1.0), 0.5, 2.0).astype(np.float32)
+
+
+def match_exposure(background: np.ndarray, gain: np.ndarray) -> np.ndarray:
+    return np.clip(background.astype(np.float32) * gain, 0, 255).astype(np.uint8)
 
 
 def update_goku(
@@ -745,6 +753,7 @@ def update_goku(
                 goku.mask_at = now
                 goku.line_mask = goku.mask
                 goku.lines = make_speed_lines(goku.mask, seed=timestamp_ms)
+                goku.gain = exposure_gain(frame, background, goku.mask)
                 if sound is not None:
                     sound.play()
                 print("[Goku] Instant transmission!" if leaving
@@ -760,8 +769,10 @@ def update_goku(
         ):
             # Lines follow the person while they are visible.
             goku.line_mask = goku.mask
-    # Keep the room live and patch only where the person stands.
-    scene = clean_plate(frame, background, goku.mask)
+        # The webcam's auto exposure drifts with the person in or out of frame:
+        # follow it so the frozen background keeps matching the live room.
+        goku.gain += 0.2 * (exposure_gain(frame, background, goku.mask) - goku.gain)
+    scene = match_exposure(background, goku.gain)
     if state.phase == "vanished":
         return scene
 
